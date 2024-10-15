@@ -98,3 +98,14 @@ def show_cam_on_image(img, mask):
     cam = cam / np.max(cam)
     cam = np.uint8(255 * cam)
     return cam
+
+
+def create_palette(cmap_name, num_colors=256):
+    cmap = plt.get_cmap(cmap_name)
+    palette = []
+    for i in range(num_colors):
+        r, g, b, _ = cmap(i / num_colors)
+        palette.extend((int(r * 255), int(g * 255), int(b * 255)))
+    return palette
+
+
