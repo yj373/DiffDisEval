@@ -1,16 +1,70 @@
-import torch
-import json
 import os
 import time
 import shutil
 import nltk
+import torch
+import json
 import numpy as np
+import torch.nn.functional as F
 
+from transformers import BlipProcessor, BlipForConditionalGeneration
+from diffusers import StableDiffusionPipeline, DDIMScheduler, DiffusionPipeline
+from typing import Optional, Union, Tuple, List, Callable, Dict
 from einops import rearrange
 from torchvision import transforms
+from ray import train
+from PIL import Image
 from sklearn.metrics import f1_score, roc_curve, auc
 from visualization import create_palette, show_cross_attention, show_cam_on_image
-from attention import AttentionStore
+from attention import AttentionStore, aggregate_all_attention
+
+
+VOC_label_map = {
+    1:'aeroplane',
+    2:'bicycle',
+    3:'bird',
+    4:'boat',
+    5:'bottle',
+    6:'bus',
+    7:'car',
+    8:'cat',
+    9:'chair',
+    10:'cow',
+    11:'diningtable',
+    12:'dog',
+    13:'horse',
+    14:'motorbike',
+    15:'person',
+    16:'pottedplant',
+    17:'sheep',
+    18:'sofa',
+    19:'train',
+    20:'tvmonitor'
+}
+
+Cityscape_label_map = {
+    1: 'road', # flat
+    2: 'person', # human
+    3: 'building', # construction
+    4: 'traffic light', # object
+    5: 'vegetation', # nature
+    6: 'car', # vehicle
+    7: 'bus', # vehicle
+    8: 'train', # vehicle
+    9: 'motorcycle', # vehicle
+    10: 'bicycle', #vehicle
+}
+
+Vaihingen_label_map = {
+    1: 'building'
+}
+
+Kvasir_label_map = {
+    1: 'tumor'
+}
+
+GUIDANCE_SCALE = 7.5
+MAX_NUM_WORDS = 77
 
 
 def encode_imgs(imgs, vae):
@@ -200,7 +254,7 @@ def generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_po
     g_cpu = torch.Generator(4307)
     t = int(t)
     latents_noisy = ldm_stable.scheduler.add_noise(input_latent, noise, torch.tensor(t, device=device))
-    images, x_t = text2image_ldm_stable(ldm_stable, prompts, controller, latent=latents_noisy, num_inference_steps=t, guidance_scale=GUIDANCE_SCALE, generator=g_cpu, low_resource=LOW_RESOURCE, height=height, width=width)
+    images, x_t = text2image_ldm_stable(ldm_stable, prompts, controller, latent=latents_noisy, num_inference_steps=t, guidance_scale=GUIDANCE_SCALE, generator=g_cpu, low_resource=False, height=height, width=width)
     layers = ("mid", "up", "down")
     cross_attention_maps = aggregate_all_attention(prompts, controller, layers, True, 0)
     self_attention_maps = aggregate_all_attention(prompts, controller, ("up", "mid", "down"), False, 0)
@@ -342,7 +396,7 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
         height = 512
         width = 512
         # pos_positions = [[4]]
-        print(pos_positions)
+        # print(pos_positions)
         mask = generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_positions, device,
                         is_self=True, is_multi_self=False, is_cross_norm=True, weight=weight, height=height, width=width,
                         verbose=verbose, alpha=alpha, beta=beta, neg_positions=neg_positions, cls_name=cls_name)
@@ -359,7 +413,7 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
             cam = show_cam_on_image(raw_image, mask)
             print("visual_cam")
             pil_img = Image.fromarray(cam[:,:,::-1])
-            display(pil_img)
+            # display(pil_img)
             pil_img.save('cam.pdf')
         del img_tensor
         del noise
@@ -368,7 +422,9 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
     return mask
 
 
-def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, result_dir, label_map, augmented_label_file, augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, seed=3407, negative_token=False):
+def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
+        augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, seed=3407, negative_token=False):
+
     start = time.time()
     if os.path.isdir(result_dir):
         shutil.rmtree(result_dir)
@@ -385,18 +441,16 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
     size = 0
     print('>>> seed: {}'.format(seed))
     for img_file in os.listdir(images_dir):
-        if img_file != '263.png':
-            continue
         if not (img_file.endswith('.png') or img_file.endswith('.tif') or img_file.endswith('.jpg')):
             continue
         img_path = os.path.join(images_dir, img_file)
         img = Image.open(img_path)
         
         size += 1
-        seg_classes = label_data[img_path]
+        seg_classes = label_data[img_path[dataset_root_length:]]
 
         for cls_name in seg_classes.keys():
-            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=True, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token)
+            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token)
             with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], cls_name)), 'wb') as f:
                 np.save(f, mask)
             for mask_threshold in thres_list:
@@ -404,15 +458,15 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
                 mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
                 mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], cls_name)))
 
-      if augmented_label:
-        for aug_cls_name in seg_classes[cls_name]:
-          mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token)
-          with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name)), 'wb') as f:
-            np.save(f, mask)
-          for mask_threshold in thres_list:
-            mask_binary = np.where(mask > mask_threshold, 255, 0)
-            mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
-            mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], aug_cls_name)))
+        if augmented_label:
+            for aug_cls_name in seg_classes[cls_name]:
+                mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token)
+                with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name)), 'wb') as f:
+                    np.save(f, mask)
+                for mask_threshold in thres_list:
+                    mask_binary = np.where(mask > mask_threshold, 255, 0)
+                    mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
+                    mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], aug_cls_name)))
     # gt_path = os.path.join(images_dir.replace('images', 'segmentations'), img_file)
     # gt = Image.open(gt_path)
     # display(gt)
@@ -420,7 +474,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
     print(">>>>>>>>>> dataset: {}, size: {}, test time: {:.2f}s".format(ds_name, size, time.time() - start))
 
 
-def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]):
+def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]):
     start = time.time()
 
     iou_res_ = {}
@@ -435,7 +489,8 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, thr
         cls_arr_dir = segmentations_dir.replace("segmentations", "class_array")
         images_dir = segmentations_dir.replace("segmentations", "images")
         augmented_label_path = segmentations_dir.replace("segmentations", augmented_label_file)
-        print('>>>> ', results_dir)
+        print('>>>> result_dir:', results_dir)
+        print('>>>> segmentations_dir:', segmentations_dir)
         with open(augmented_label_path, 'r') as f:
             label_data = json.load(f)
 
@@ -446,6 +501,7 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, thr
         for thres in thres_list:
             predict_root_dir = os.path.join(results_dir, '{}'.format(thres))
             if not os.path.isdir(predict_root_dir):
+                print("{} does not exist".format(predict_root_dir))
                 continue
             iou_res = []
             pixel_acc_res = []
@@ -455,35 +511,35 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, thr
                 if not(seg_file.endswith('.png') or seg_file.endswith('.tif') or seg_file.endswith('.jpg')):
                     continue
                 img_path = os.path.join(images_dir, seg_file)
-                seg_classes = label_data[img_path]
+                seg_classes = label_data[img_path[dataset_root_length:]]
 
-            for cls_name in seg_classes.keys():
-                all_classes = [cls_name] + seg_classes[cls_name]
-                seg_cls_arr = np.load(os.path.join(cls_arr_dir, '{}_{}.npy'.format(seg_file.split('.')[0], cls_name)))
-                iou = -1
-                pixel_acc = -1
-                f1 = -1
-                for cls in all_classes:
-                    predict_path = os.path.join(predict_root_dir, '{}_{}.png'.format(seg_file.split('.')[0], cls))
-                    if os.path.isfile(predict_path):
-                        predict_img = Image.open(predict_path)
-                        predict_cls_arr = np.asarray(predict_img) / 255
+                for cls_name in seg_classes.keys():
+                    all_classes = [cls_name] + seg_classes[cls_name]
+                    seg_cls_arr = np.load(os.path.join(cls_arr_dir, '{}_{}.npy'.format(seg_file.split('.')[0], cls_name)))
+                    iou = -1
+                    pixel_acc = -1
+                    f1 = -1
+                    for cls in all_classes:
+                        predict_path = os.path.join(predict_root_dir, '{}_{}.png'.format(seg_file.split('.')[0], cls))
+                        if os.path.isfile(predict_path):
+                            predict_img = Image.open(predict_path)
+                            predict_cls_arr = np.asarray(predict_img) / 255
 
-                        if predict_cls_arr.shape != seg_cls_arr.shape:
-                            print('>>>invalid prediction', predict_path, seg_cls_arr.shape, predict_cls_arr.shape)
-                            continue
-                        intersection = np.sum(predict_cls_arr * seg_cls_arr).astype(np.float32)
-                        union = np.sum(np.logical_or(predict_cls_arr, seg_cls_arr)).astype(np.float32)
-                        correct = np.sum(predict_cls_arr == seg_cls_arr).astype(np.float32)
+                            if predict_cls_arr.shape != seg_cls_arr.shape:
+                                print('>>>invalid prediction', predict_path, seg_cls_arr.shape, predict_cls_arr.shape)
+                                continue
+                            intersection = np.sum(predict_cls_arr * seg_cls_arr).astype(np.float32)
+                            union = np.sum(np.logical_or(predict_cls_arr, seg_cls_arr)).astype(np.float32)
+                            correct = np.sum(predict_cls_arr == seg_cls_arr).astype(np.float32)
 
-                        iou_ = intersection / union
-                        pixel_acc_ = correct / (seg_cls_arr.shape[0] * seg_cls_arr.shape[1])
-                        f1_ = f1_score(seg_cls_arr.flatten(), predict_cls_arr.flatten())
+                            iou_ = intersection / union
+                            pixel_acc_ = correct / (seg_cls_arr.shape[0] * seg_cls_arr.shape[1])
+                            f1_ = f1_score(seg_cls_arr.flatten(), predict_cls_arr.flatten())
 
-                        if f1_ > f1:
-                            f1 = f1_
-                            pixel_acc = pixel_acc_
-                            iou = iou_
+                            if f1_ > f1:
+                                f1 = f1_
+                                pixel_acc = pixel_acc_
+                                iou = iou_
 
                     iou_res.append(iou)
                     pixel_acc_res.append(pixel_acc)
@@ -534,3 +590,66 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, thr
     print('>>> pixel_acc AUC: {:.4f}, pixel_acc optimum: {:.4f}, pixel_acc AUC/optim: {:.4f}'.format(pixel_auc, pixel_optim, pixel_auc_over_optim))
     print('>>> analysis time: {:.2f}s'.format(time.time() - start))
     return f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim
+
+
+def stable_diffusion_func(config, args=None):
+    # print(config)
+    # print(">>>")
+    model_key = args.diffusion_model
+    device = torch.device('cuda:0')
+    if model_key.endswith("LDM"):
+        ldm_stable = DiffusionPipeline.from_pretrained(model_key, torch_dtype=torch.bfloat16).to(device)
+    else:
+        ldm_stable = StableDiffusionPipeline.from_pretrained(model_key, torch_dtype=torch.bfloat16).to(device)
+
+    ldm_stable.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler",
+                                                        beta_start=0.00085,beta_end=0.012,
+                                                        steps_offset=1)
+    processor = BlipProcessor.from_pretrained(args.BLIP)
+    model = BlipForConditionalGeneration.from_pretrained(args.BLIP).to(device)
+    dataset_names = ["VOC2012", "Cityscape", "Vaihingen", "Kvasir-SEG"]
+    datasets = [os.path.join(args.dataset_root, ds) for ds in dataset_names]
+    label_maps = [VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map]
+    map_weight_sum = config["map_weight1"] + config["map_weight2"] + config["map_weight3"] + config["map_weight4"]
+    map_weight1_ = config["map_weight1"] / map_weight_sum
+    map_weight2_ = config["map_weight2"] / map_weight_sum
+    map_weight3_ = config["map_weight3"] / map_weight_sum
+    map_weight4_ = config["map_weight4"] / map_weight_sum
+    weight = [map_weight1_, map_weight2_, map_weight3_, map_weight4_]
+
+    res_dir = "results_0.9_{}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{}".format(int(config["t"]), map_weight1_, map_weight2_, map_weight3_, map_weight4_, config["alpha"], config["beta"], args.negative_token)
+    root_dir = os.path.join(args.output_dir, res_dir)
+    thres_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+    if os.path.isdir(root_dir):
+        shutil.rmtree(root_dir)
+    os.mkdir(root_dir)
+    augmented_label_file = 'aug_label_blip_bert_0.9.json'
+    dataset_root_length = len(args.dataset_root)
+    for ds, label_map in zip(datasets, label_maps):
+        images_dir = os.path.join(ds, "images")
+        result_dir = os.path.join(root_dir, ds.split('/')[-1])
+        # print(">>>")
+        # print(images_dir)
+        # print(">>>")
+        # print(result_dir)
+        domain_test(processor, model, ldm_stable, device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
+            augmented_label=True, thres_list=thres_list, weight=weight, t=int(config["t"]), alpha=config["alpha"], beta=config["beta"], seed=args.seed, negative_token=args.negative_token)
+
+    results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
+    segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
+    f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list)
+
+    del ldm_stable
+    del model
+    del processor
+    torch.cuda.empty_cache()
+    shutil.rmtree(root_dir)
+
+    train.report({
+        "f1_auc": f1_auc,
+        "f1_optim": f1_optim,
+        "iou_auc": iou_auc,
+        "iou_optim": iou_optim,
+        "pixel_auc": pixel_auc,
+        "pixel_optim": pixel_optim
+    })

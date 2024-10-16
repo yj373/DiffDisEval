@@ -1,13 +1,15 @@
-from PIL import Image
 import cv2
 import numpy as np
-from typing import Tuple
-from attention import aggregate_attention
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+
+from PIL import Image
+from typing import Optional, Union, Tuple, List, Callable, Dict
+from attention import aggregate_attention, AttentionStore
 
 
 ## Visualization code utils
-def view_images(images, palette, num_rows=1, offset_ratio=0.02):
+def view_images(images, palette, num_rows=1, offset_ratio=0.02, name='output.png'):
     if type(images) is list:
         num_empty = len(images) % num_rows
     elif images.ndim == 4:
@@ -33,7 +35,8 @@ def view_images(images, palette, num_rows=1, offset_ratio=0.02):
     pil_img = Image.fromarray(image_)
     palette_image = pil_img.convert('P')
     palette_image.putpalette(palette)
-    display(palette_image)
+    # display(palette_image)
+    palette_image.save(name)
 
 
 def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)):

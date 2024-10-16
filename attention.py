@@ -1,6 +1,5 @@
 from typing import Optional, Union, Tuple, List, Callable, Dict
 import torch
-from diffusers import StableDiffusionPipeline, DDIMScheduler, DiffusionPipeline
 import numpy as np
 import abc
 
