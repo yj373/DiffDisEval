@@ -106,7 +106,7 @@ def generate_images(args):
                 image = pipe(prompt, height=512, width=512, num_inference_steps=50).images[0]
                 image.save(os.path.join(args.output_dir, "{}-{}.png".format(i, j)))
 
-    else if args.diffusion_model_name.startswith("SDXL"):
+    elif args.diffusion_model_name.startswith("SDXL"):
         base_id = os.path.join(model_id, "stable-diffusion-xl-base-1.0")
         base = DiffusionPipeline.from_pretrained(base_id, torch_dtype=torch.float16, use_safetensors=True)
         base = base.to("cuda")
@@ -135,12 +135,12 @@ def generate_images(args):
                 ).images[0]
                 image.save(os.path.join(args.output_dir, "{}-{}.png".format(i, j)))
 
-    else if args.diffusion_model_name.startswith("stable-cascade"):
+    elif args.diffusion_model_name.startswith("stable-cascade"):
         prior_id = os.path.join(model_id, "stable-cascade-prior")
-        prior = StableCascadePriorPipeline.from_pretrained(prior_id, variant="fp16", torch_dtype=torch.float16).to("cuda")
+        prior = StableCascadePriorPipeline.from_pretrained(prior_id, variant="bf16", torch_dtype=torch.bfloat16).to("cuda")
 
         decoder_id = os.path.join(model_id, "stable-cascade")
-        decoder = StableCascadeDecoderPipeline.from_pretrained(decoder_id, variant="fp16", torch_dtype=torch.float16).to("cuda")
+        decoder = StableCascadeDecoderPipeline.from_pretrained(decoder_id, variant="bf16", torch_dtype=torch.float16).to("cuda")
 
         for i, prompt in enumerate(prompts):
             for j in range(args.num_images_per_prompt):
@@ -162,6 +162,8 @@ def generate_images(args):
                     num_inference_steps=10
                 ).images[0]
                 decoder_output.save(os.path.join(args.output_dir, "{}-{}.png".format(i, j)))
+    else:
+        print("unsupported diffusion model: {}".format(args.diffusion_model_name))
 
 
 def image_reward(args, dir_list):
@@ -194,6 +196,7 @@ def hps(args, dir_list):
                 score_list[index] += scores[index]
     print(score_list)
 
+
 def main():
     args = parse_args()
     if args.generate_images:
@@ -201,6 +204,9 @@ def main():
     else:
         assert os.path.isdir(args.output_dir) and len(os.listdir(args.output_dir)) == args.num_prompts * args.num_images_per_prompt
 
+
+if __name__ == '__main__':
+    main()
     
     
 

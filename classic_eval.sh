@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=6 nohup python -u main_classic_eval.py --diffusion_model_name stable-cascade --output_dir /dev/shm/alexJiang/output/DiffDisEval/stable-cascade/generated_images --generate_images --num_images_per_prompt 4 --num_prompts 25 > SC.log 2>&1 &
