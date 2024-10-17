@@ -145,6 +145,17 @@ def main_single(args):
             "beta_prior": 0.01,
         }
         stable_cascade_func(config, args)
+    else:
+        config = {
+            "t": 100,
+            'map_weight1': 0.3,
+            "map_weight2": 0.5,
+            "map_weight3": 0.1,
+            "map_weight4": 0.1,
+            'alpha': 8,
+            'beta': 0.4,
+        }
+        stable_diffusion_func(config, args)
 
 if __name__ == '__main__':
     args = parse_args()

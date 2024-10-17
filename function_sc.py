@@ -21,7 +21,7 @@ from math import ceil
 from torch import nn
 from sklearn.metrics import f1_score, roc_curve, auc
 from visualization import create_palette, show_cross_attention, show_cam_on_image
-from attention import AttentionStore, aggregate_all_attention
+from attention import AttentionStore, aggregate_all_attention, aggregate_all_attention_sc
 from function import VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map, analysis, same_seeds
 
 GUIDANCE_SCALE = 7.5
@@ -448,14 +448,14 @@ def generate_att_sc(
 
     layers = ("mid", "up", "down")
     imgs = []
-    cross_attention_maps_prior = aggregate_all_attention(prompts, controller_prior, layers, True, 0)
+    cross_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, layers, True, 0)
     for idx in range(len(cross_attention_maps_prior)):
         out_att = cross_attention_maps_prior[idx].permute(2, 0, 1).float()
         att_max = torch.amax(out_att, dim=(1,2), keepdim=True)
         att_min = torch.amin(out_att, dim=(1,2), keepdim=True)
         out_att = (out_att - att_min) / (att_max - att_min)
         imgs.append(out_att)
-    self_attention_maps_prior = aggregate_all_attention(prompts, controller_prior, ("up", "mid", "down"), False, 0)
+    self_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, ("up", "mid", "down"), False, 0)
 
     cross_att_map = torch.stack(imgs).sum(0)[pos_positions[0]].mean(0).view(24*24, 1)
     for pos in pos_positions[1:]:
