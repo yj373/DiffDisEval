@@ -67,6 +67,7 @@ GUIDANCE_SCALE = 7.5
 MAX_NUM_WORDS = 77
 
 
+# encode images for SD and SDXL
 def encode_imgs(imgs, vae):
     # imgs: [B, 3, H, W]
     imgs = 2 * imgs - 1
@@ -593,8 +594,6 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dat
 
 
 def stable_diffusion_func(config, args=None):
-    # print(config)
-    # print(">>>")
     model_key = args.diffusion_model
     device = torch.device('cuda:0')
     if model_key.endswith("LDM"):
@@ -643,13 +642,4 @@ def stable_diffusion_func(config, args=None):
     del model
     del processor
     torch.cuda.empty_cache()
-    shutil.rmtree(root_dir)
-
-    train.report({
-        "f1_auc": f1_auc,
-        "f1_optim": f1_optim,
-        "iou_auc": iou_auc,
-        "iou_optim": iou_optim,
-        "pixel_auc": pixel_auc,
-        "pixel_optim": pixel_optim
-    })
+    c

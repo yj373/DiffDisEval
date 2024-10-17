@@ -12,6 +12,7 @@ from ray.tune import ResultGrid
 from ray.tune import CLIReporter
 from ray.train import RunConfig
 from function import stable_diffusion_func
+from function_sc import stable_cascade_func
 
 
 def parse_args():
@@ -47,24 +48,26 @@ def parse_args():
         help="whether to use negative token",
     )
     parser.add_argument(
+        "--single_run",
+        action='store_true',
+        help="whether to only run a single trial",
+    )
+    parser.add_argument(
         "--num_cpu",
         type=int,
         default=4,
-        required=True,
         help="number of CPU cores",
     )
     parser.add_argument(
         "--num_gpu",
         type=int,
         default=1,
-        required=True,
         help="number of GPUs",
     )
     parser.add_argument(
         "--num_runs",
         type=int,
-        default=10,
-        required=True,
+        default=2,
         help="number of triles for tuning",
     )
     parser.add_argument(
@@ -95,8 +98,7 @@ class TrialTerminationReporter(CLIReporter):
         return self.num_terminated > old_num_terminated
 
 
-def main():
-    args = parse_args()
+def main(args):
     nltk.download('punkt')
     nltk.download('averaged_perceptron_tagger')
     nltk.download('averaged_perceptron_tagger_eng')
@@ -128,5 +130,25 @@ def main():
         best_result["f1_auc"], best_result["f1_optim"], best_result["iou_auc"], best_result["iou_optim"], best_result["pixel_auc"], best_result["pixel_optim"]
     ))
 
+
+def main_single(args):
+    nltk.download('punkt')
+    nltk.download('averaged_perceptron_tagger')
+    nltk.download('averaged_perceptron_tagger_eng')
+    nltk.download('wordnet')
+
+    if args.diffusion_model.endswith("stable-cascade"):
+        config = {
+            "t": 100,
+            "neg_weight": 1.0,
+            "alpha_prior": 18.65,
+            "beta_prior": 0.01,
+        }
+        stable_cascade_func(config, args)
+
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    if args.single_run:
+        main_single(args)
+    else:
+        main(args)

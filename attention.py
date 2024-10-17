@@ -69,7 +69,12 @@ class AttentionStore(AttentionControl):
         else:
             for key in self.attention_store:
                 for i in range(len(self.attention_store[key])):
-                    self.attention_store[key][i] += self.step_store[key][i]
+                    # print("key", key)
+                    # print("len(self.attention_store[key])", len(self.attention_store[key]))
+                    # print("len(self.step_store[key])", len(self.step_store[key]))
+                    # print(">>>")
+                    if i < len(self.step_store[key]):
+                        self.attention_store[key][i] += self.step_store[key][i]
         self.step_store = self.get_empty_store()
 
     @torch.no_grad()
@@ -113,6 +118,38 @@ def aggregate_all_attention(prompts, attention_store: AttentionStore, from_where
     atts = []
     # print(len(att_8), len(att_16), len(att_32), len(att_64)) # 1, 5, 5, 5, both LDM and SD
     for att in [att_8, att_16, att_32, att_64]:
+        att = torch.cat(att, dim=0)
+        att = att.sum(0) / att.shape[0]
+        atts.append(att.cpu())
+    del attention_maps
+    torch.cuda.empty_cache()
+    return atts
+
+
+@torch.no_grad()
+def aggregate_all_attention_sc(prompts, attention_store: AttentionStore, from_where: List[str], is_cross: bool, select: int):
+    attention_maps = attention_store.get_average_attention()
+    att_16 = []
+    att_24 = []
+    att_32 = []
+    for location in from_where:
+        for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
+            if item.shape[1] == 16*16:
+                cross_maps = item.reshape(len(prompts), -1, 16, 16, item.shape[-1])[select]
+                att_16.append(cross_maps)
+            if item.shape[1] == 24*24:
+                cross_maps = item.reshape(len(prompts), -1, 24, 24, item.shape[-1])[select]
+                att_24.append(cross_maps)
+            if item.shape[1] == 32*32:
+                cross_maps = item.reshape(len(prompts), -1, 32, 32, item.shape[-1])[select]
+                att_32.append(cross_maps)
+
+    atts = []
+    # print('is_cross:', is_cross)
+    # print(len(att_16), len(att_24), len(att_32)) # 0, 64, 0, prior; 24, 0, 44 decoder
+    for att in [att_16, att_24, att_32]:
+        if len(att) == 0:
+          continue
         att = torch.cat(att, dim=0)
         att = att.sum(0) / att.shape[0]
         atts.append(att.cpu())
