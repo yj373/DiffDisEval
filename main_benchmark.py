@@ -53,6 +53,11 @@ def parse_args():
         help="whether to only run a single trial",
     )
     parser.add_argument(
+        "--single_image",
+        action='store_true',
+        help="whether to only run a single trial",
+    )
+    parser.add_argument(
         "--num_cpu",
         type=int,
         default=4,

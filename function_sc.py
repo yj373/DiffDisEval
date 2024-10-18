@@ -25,6 +25,7 @@ from attention import AttentionStore, aggregate_all_attention, aggregate_all_att
 from function import VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map, analysis, same_seeds
 
 GUIDANCE_SCALE = 7.5
+# GUIDANCE_SCLAE = 4.0
 MAX_NUM_WORDS = 77
 
 def load_effnet(path):
@@ -65,6 +66,8 @@ def register_attention_control_sc(model, controller, prior=True):
     def ca_forward(self, place_in_unet):
 
         def forward(x, kv):
+            # print("kv shape", kv.shape) # prior: torch.Size([2, 85, 2048])
+            # print("x shape", x.shape) # prior: torch.Size([2, 2048, 24, 24])
             kv = self.kv_mapper(kv) # encoder_hidden_states
             norm_x = self.norm(x) # hidden_states
 
@@ -318,9 +321,11 @@ def diffusion_step_prior(
         else:
             timestep_ratio = t.expand(latents.size(0)).to(dtype)
 
-        # print(text_encoder_pooled.shape) # torch.Size([2, 1, 1280])
-        # print(text_encoder_hidden_states.shape) # torch.Size([2, 77, 1280])
-        # print(image_embeds.shape) # torch.Size([2, 1, 768])
+        print("text_encoder_pooled.shape", text_encoder_pooled.shape) # torch.Size([2, 1, 1280])
+        print("text_encoder_hidden_states.shape", text_encoder_hidden_states.shape) # torch.Size([2, 77, 1280])
+        print("image_embeds.shape", image_embeds.shape) # torch.Size([2, 1, 768])
+        print("latents.shape", latents.shape) # torch.Size([1, 16, 24, 24])
+        print("timestep_ratio.shape", timestep_ratio.shape) # torch.Size([1])
         predicted_image_embedding = prior.prior(
             sample=torch.cat([latents] * 2),
             timestep_ratio= torch.cat([timestep_ratio] * 2),
@@ -428,7 +433,8 @@ def generate_att_sc(
     beta_prior: float = 0.4,
     alpha_decoder: float = 8.0,
     beta_decoder: float = 0.4,
-    decoder_weight = [0.5, 0.5]
+    decoder_weight = [0.5, 0.5],
+    cls_name='',
 ):
     controller_prior.reset()
     controller_decoder.reset()
@@ -448,7 +454,7 @@ def generate_att_sc(
 
     layers = ("mid", "up", "down")
     imgs = []
-    cross_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, layers, True, 0)
+    cross_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, layers, True, 0) # here 0 means the first peompt
     for idx in range(len(cross_attention_maps_prior)):
         out_att = cross_attention_maps_prior[idx].permute(2, 0, 1).float()
         att_max = torch.amax(out_att, dim=(1,2), keepdim=True)
@@ -456,7 +462,6 @@ def generate_att_sc(
         out_att = (out_att - att_min) / (att_max - att_min)
         imgs.append(out_att)
     self_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, ("up", "mid", "down"), False, 0)
-
     cross_att_map = torch.stack(imgs).sum(0)[pos_positions[0]].mean(0).view(24*24, 1)
     for pos in pos_positions[1:]:
         cross_att_map += torch.stack(imgs).sum(0)[pos].mean(0).view(24*24, 1)
@@ -492,7 +497,7 @@ def generate_att_sc(
         # palette_image.putpalette(palette)
         # display(palette_image)
         print("prior: 24x24 cross att map")
-        show_cross_attention(prompts, prior.tokenizer, controller_prior, palette, res=24, from_where=layers)
+        show_cross_attention(prompts, prior.tokenizer, controller_prior, palette, res=24, from_where=layers, cls_name=cls_name)
 
     att_map = att_map_prior
     return att_map
@@ -568,8 +573,9 @@ def stable_cascade_inference(
                 neg_start_pos = i + 1
                 break
             if pos_start:
-                pos_positions.append([i + 8])
-        # print('positive tokens:', pos_positions)
+                # pos_positions.append([i + 8])
+                pos_positions.append([i + 4])
+        print('positive tokens:', pos_positions, 'cls_name: ', cls_name)
         if negative_token:
             for i, (word, tag) in enumerate(tagged_tokens[neg_start_pos:-1]):
                 if tag.startswith('N'):
@@ -606,6 +612,7 @@ def stable_cascade_inference(
             alpha_decoder=8.0,
             beta_decoder=0.4,
             decoder_weight=[0.5, 0.5],
+            cls_name=cls_name,
         )
         mask = F.interpolate(
             mask.unsqueeze(0).unsqueeze(0),
@@ -616,7 +623,7 @@ def stable_cascade_inference(
             cam = show_cam_on_image(raw_image, mask)
             print("visual_cam")
             pil_img = Image.fromarray(cam[:,:,::-1])
-            pil_img.save('cam.pdf')
+            pil_img.save('cam_{}.pdf'.format(cls_name))
 
         del img_tensor
         torch.cuda.empty_cache()
@@ -644,6 +651,7 @@ def domain_test(
     neg_weight=1.0,
     alpha_prior=8.0,
     beta_prior=0.55,
+    single_image=False,
 ):
     start = time.time()
 
@@ -660,10 +668,14 @@ def domain_test(
         label_data = json.load(f)
 
     size = 0
+    verbose = single_image
     print('>>> seed: {}'.format(seed))
     for img_file in os.listdir(images_dir):
         if not (img_file.endswith('.png') or img_file.endswith('.tif') or img_file.endswith('.jpg')):
             continue
+        if single_image and not (img_file == '9.png'):
+            continue
+            print(img_file)
         img_path = os.path.join(images_dir, img_file)
         size += 1
 
@@ -680,7 +692,7 @@ def domain_test(
                 prior,
                 decoder,
                 effnet,
-                verbose=False,
+                verbose=verbose,
                 seed=seed,
                 negative_token=True,
                 neg_weight=neg_weight,
@@ -706,7 +718,7 @@ def domain_test(
                         prior,
                         decoder,
                         effnet,
-                        verbose=False,
+                        verbose=verbose,
                         seed=seed,
                         negative_token=True,
                         neg_weight=neg_weight,
@@ -742,8 +754,8 @@ def stable_cascade_func(config, args=None):
     effnet = effnet.bfloat16().to(device)
 
     dataset_names = ["VOC2012", "Cityscape", "Vaihingen", "Kvasir-SEG"]
-    datasets = [os.path.join(args.dataset_root, ds) for ds in dataset_names]
-    label_maps = [VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map]
+    datasets = [os.path.join(args.dataset_root, ds) for ds in dataset_names] if not args.single_image else [os.path.join(args.dataset_root, "VOC2012")]
+    label_maps = [VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map] if not args.single_image else [VOC_label_map]
 
     res_dir = "results_0.9_{}_{:.2f}_{:.2f}_{:.2f}".format(int(config["t"]), config["neg_weight"], config["alpha_prior"], config["beta_prior"])
     root_dir = os.path.join(args.output_dir, res_dir)
@@ -778,11 +790,22 @@ def stable_cascade_func(config, args=None):
             neg_weight=config["neg_weight"],
             alpha_prior=config["alpha_prior"],
             beta_prior=config["beta_prior"],
+            single_image=args.single_image
         )
 
-    results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
-    segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
-    f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list)
+    if not args.single_image:
+        results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
+        segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
+        f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list)
+
+        train.report({
+            "f1_auc": f1_auc,
+            "f1_optim": f1_optim,
+            "iou_auc": iou_auc,
+            "iou_optim": iou_optim,
+            "pixel_auc": pixel_auc,
+            "pixel_optim": pixel_optim
+        })           
 
     del prior
     del model
@@ -791,11 +814,4 @@ def stable_cascade_func(config, args=None):
     torch.cuda.empty_cache()
     shutil.rmtree(root_dir)
 
-    train.report({
-        "f1_auc": f1_auc,
-        "f1_optim": f1_optim,
-        "iou_auc": iou_auc,
-        "iou_optim": iou_optim,
-        "pixel_auc": pixel_auc,
-        "pixel_optim": pixel_optim
-    })                                             
+                                      
