@@ -104,25 +104,47 @@ def main(args):
     nltk.download('averaged_perceptron_tagger_eng')
     nltk.download('wordnet')
     # nltk.download()
-    search_space = {
-        't': tune.uniform(50, 150),
-        'map_weight1': tune.uniform(0, 1),
-        'map_weight2': tune.uniform(0, 1),
-        'map_weight3': tune.uniform(0, 1),
-        'map_weight4': tune.uniform(0, 1),
-        'alpha': tune.uniform(1, 10),
-        'beta': tune.uniform(0, 1),
-    }
     os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
-    # reporter = CLIReporter()
-    # reporter.update_interval = 60
-    tuner = tune.Tuner(
-        tune.with_resources(tune.with_parameters(stable_diffusion_func, args=args), resources={"cpu": args.num_cpu, "gpu": args.num_gpu}),
-        param_space=search_space,
-        tune_config=tune.TuneConfig(search_alg=OptunaSearch(), metric="f1_auc", mode="max", num_samples=args.num_runs),
-        run_config=RunConfig(progress_reporter=ExperimentTerminationReporter()),
-        # run_config=RunConfig(progress_reporter=reporter),
-    )
+    if args.diffusion_model.endswith("stable-cascade"):
+        search_space = {
+            't': tune.uniform(90, 110),
+            'neg_weight': tune.uniform(0, 0),
+            'alpha_prior': tune.uniform(0, 20),
+            'beta_prior': tune.uniform(0, 1),
+        }
+        reporter = CLIReporter()
+        reporter.max_report_frequency = 60
+        tuner = tune.Tuner(
+            tune.with_resources(tune.with_parameters(stable_cascade_func, args=args), resources={"cpu": args.num_cpu, "gpu": args.num_gpu}),
+            param_space=search_space,
+            tune_config=tune.TuneConfig(search_alg=OptunaSearch(), metric="f1_auc", mode="max", num_samples=args.num_runs),
+            run_config=RunConfig(progress_reporter=reporter),
+        )
+        # results = tuner.fit()
+        # best_result = results.get_best_result("f1_auc", "max")
+        # print(">>> best config: ", best_result.config)
+        # print(">>> f1_auc: {:.4f}, f1_optim: {:.4f}, iou_auc: {:.4f}, iou_optim: {:.4f}, pixel_auc: {:.4f}, pixel_optim: {:.4f}".format(
+        #     best_result["f1_auc"], best_result["f1_optim"], best_result["iou_auc"], best_result["iou_optim"], best_result["pixel_auc"], best_result["pixel_optim"]
+        # ))
+    else:
+        search_space = {
+            't': tune.uniform(50, 150),
+            'map_weight1': tune.uniform(0, 1),
+            'map_weight2': tune.uniform(0, 1),
+            'map_weight3': tune.uniform(0, 1),
+            'map_weight4': tune.uniform(0, 1),
+            'alpha': tune.uniform(1, 10),
+            'beta': tune.uniform(0, 1),
+        }
+    
+        reporter = CLIReporter()
+        reporter.max_report_frequency = 60
+        tuner = tune.Tuner(
+            tune.with_resources(tune.with_parameters(stable_diffusion_func, args=args), resources={"cpu": args.num_cpu, "gpu": args.num_gpu}),
+            param_space=search_space,
+            tune_config=tune.TuneConfig(search_alg=OptunaSearch(), metric="f1_auc", mode="max", num_samples=args.num_runs),
+            run_config=RunConfig(progress_reporter=reporter),
+        )
     results = tuner.fit()
     best_result = results.get_best_result("f1_auc", "max")
     print(">>> best config: ", best_result.config)
@@ -140,9 +162,9 @@ def main_single(args):
     if args.diffusion_model.endswith("stable-cascade"):
         config = {
             "t": 100,
-            "neg_weight": 1.0,
-            "alpha_prior": 18.65,
-            "beta_prior": 0.01,
+            "neg_weight": 0.0,
+            "alpha_prior": 8,
+            "beta_prior": 0.55,
         }
         stable_cascade_func(config, args)
     else:
