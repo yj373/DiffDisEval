@@ -642,4 +642,13 @@ def stable_diffusion_func(config, args=None):
     del model
     del processor
     torch.cuda.empty_cache()
-    c
+    shutil.rmtree(root_dir)
+
+    train.report({
+        "f1_auc": f1_auc,
+        "f1_optim": f1_optim,
+        "iou_auc": iou_auc,
+        "iou_optim": iou_optim,
+        "pixel_auc": pixel_auc,
+        "pixel_optim": pixel_optim
+    })

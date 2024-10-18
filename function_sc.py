@@ -568,7 +568,7 @@ def stable_cascade_inference(
                 neg_start_pos = i + 1
                 break
             if pos_start:
-                pos_positions.append([i])
+                pos_positions.append([i + 8])
         # print('positive tokens:', pos_positions)
         if negative_token:
             for i, (word, tag) in enumerate(tagged_tokens[neg_start_pos:-1]):
