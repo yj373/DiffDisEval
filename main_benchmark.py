@@ -169,7 +169,7 @@ def main_single(args):
             "t": 100,
             "neg_weight": 0.0,
             "alpha_prior": 8,
-            "beta_prior": 0.55,
+            "beta_prior": 0.8,
         }
         stable_cascade_func(config, args)
     else:

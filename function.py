@@ -521,10 +521,13 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dat
                     pixel_acc = -1
                     f1 = -1
                     for cls in all_classes:
-                        predict_path = os.path.join(predict_root_dir, '{}_{}.png'.format(seg_file.split('.')[0], cls))
-                        if os.path.isfile(predict_path):
-                            predict_img = Image.open(predict_path)
-                            predict_cls_arr = np.asarray(predict_img) / 255
+                        for mask_idx in range(77):
+                            predict_path = os.path.join(predict_root_dir, '{}_{}_{}.png'.format(seg_file.split('.')[0], cls, mask_idx))
+                            if os.path.isfile(predict_path):
+                                predict_img = Image.open(predict_path)
+                                predict_cls_arr = np.asarray(predict_img) / 255
+                            else:
+                                break
 
                             if predict_cls_arr.shape != seg_cls_arr.shape:
                                 print('>>>invalid prediction', predict_path, seg_cls_arr.shape, predict_cls_arr.shape)

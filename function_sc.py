@@ -434,7 +434,8 @@ def generate_att_sc(
     alpha_decoder: float = 8.0,
     beta_decoder: float = 0.4,
     decoder_weight = [0.5, 0.5],
-    cls_name='',
+    cls_name: str = '',
+    all_masks: bool = False, # generate a mask for all tokens
 ):
     controller_prior.reset()
     controller_decoder.reset()
@@ -453,7 +454,7 @@ def generate_att_sc(
     )
 
     layers = ("mid", "up", "down")
-    imgs = []
+    imgs = [] # a list of tensors [24, 24, 85]
     cross_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, layers, True, 0) # here 0 means the first peompt
     for idx in range(len(cross_attention_maps_prior)):
         out_att = cross_attention_maps_prior[idx].permute(2, 0, 1).float()
@@ -462,34 +463,7 @@ def generate_att_sc(
         out_att = (out_att - att_min) / (att_max - att_min)
         imgs.append(out_att)
     self_attention_maps_prior = aggregate_all_attention_sc(prompts, controller_prior, ("up", "mid", "down"), False, 0)
-    cross_att_map = torch.stack(imgs).sum(0)[pos_positions[0]].mean(0).view(24*24, 1)
-    for pos in pos_positions[1:]:
-        cross_att_map += torch.stack(imgs).sum(0)[pos].mean(0).view(24*24, 1)
-    if len(pos_positions) > 1:
-        cross_att_map /= len(pos_positions)
 
-    if len(neg_positions) > 0:
-        cross_att_map_neg = torch.zeros_like(cross_att_map)
-        for pos in neg_positions:
-            cross_att_map_neg += torch.stack(imgs).sum(0)[pos].mean(0).view(24*24, 1)
-        cross_att_map_neg /= len(neg_positions)
-        cross_att_map -= neg_weight * cross_att_map_neg
-
-    self_att = self_attention_maps_prior[-1].view(24*24, 24*24).float()
-    self_att = self_att / self_att.max()
-    cross_att_map = torch.matmul(self_att, cross_att_map)
-
-    att_map_prior = cross_att_map.view(24, 24)
-    att_map_prior = F.interpolate(att_map_prior.unsqueeze(0).unsqueeze(0),
-                                size=(height_vqgan, width_vqgan),
-                                mode='bilinear',
-                                align_corners=False).squeeze().squeeze()
-    att_map_prior = (att_map_prior - att_map_prior.min()) / (att_map_prior.max() - att_map_prior.min())
-    att_map_prior = F.sigmoid(alpha_prior * (att_map_prior - beta_prior))
-    att_map_prior = (att_map_prior - att_map_prior.min()) / (att_map_prior.max() - att_map_prior.min())
-
-    del cross_att_map
-    torch.cuda.empty_cache()
     if verbose:
         # att_map_img_prior = Image.fromarray((att_map_prior.cpu().detach().numpy()*255).astype(np.uint8), mode="L")
         palette = create_palette('viridis')
@@ -498,6 +472,55 @@ def generate_att_sc(
         # display(palette_image)
         print("prior: 24x24 cross att map")
         show_cross_attention(prompts, prior.tokenizer, controller_prior, palette, res=24, from_where=layers, cls_name=cls_name)
+    if not all_masks:
+        cross_att_map = torch.stack(imgs).sum(0)[pos_positions[0]].mean(0).view(24*24, 1)
+        for pos in pos_positions[1:]:
+            cross_att_map += torch.stack(imgs).sum(0)[pos].mean(0).view(24*24, 1)
+        if len(pos_positions) > 1:
+            cross_att_map /= len(pos_positions)
+
+        if len(neg_positions) > 0:
+            cross_att_map_neg = torch.zeros_like(cross_att_map)
+            for pos in neg_positions:
+                cross_att_map_neg += torch.stack(imgs).sum(0)[pos].mean(0).view(24*24, 1)
+            cross_att_map_neg /= len(neg_positions)
+            cross_att_map -= neg_weight * cross_att_map_neg
+
+        self_att = self_attention_maps_prior[-1].view(24*24, 24*24).float()
+        self_att = self_att / self_att.max()
+        cross_att_map = torch.matmul(self_att, cross_att_map)
+
+        att_map_prior = cross_att_map.view(24, 24)
+        att_map_prior = F.interpolate(att_map_prior.unsqueeze(0).unsqueeze(0),
+                                size=(height_vqgan, width_vqgan),
+                                mode='bilinear',
+                                align_corners=False).squeeze().squeeze()
+        att_map_prior = (att_map_prior - att_map_prior.min()) / (att_map_prior.max() - att_map_prior.min())
+        att_map_prior = F.sigmoid(alpha_prior * (att_map_prior - beta_prior))
+        att_map_prior = (att_map_prior - att_map_prior.min()) / (att_map_prior.max() - att_map_prior.min())
+        att_map_prior = [att_map_prior]
+        del cross_att_map
+        torch.cuda.empty_cache()
+    else:
+        assert len(imgs) == 1
+        cross_att_maps = imgs[0]
+        att_map_prior = []
+        tokens = prior.tokenizer.encode(prompts[0])
+        print("num tokens", len(tokens))
+        for i in range(len(tokens)):
+            cross_att_map = cross_att_maps[i].mean(0).view(24*24, 1)
+            self_att = self_attention_maps_prior[-1].view(24*24, 24*24).float()
+            self_att = self_att / self_att.max()
+            cross_att_map = torch.matmul(self_att, cross_att_map)
+            att_map_prior_ = cross_att_map.view(24, 24)
+            att_map_prior_ = F.interpolate(att_map_prior_.unsqueeze(0).unsqueeze(0),
+                                size=(height_vqgan, width_vqgan),
+                                mode='bilinear',
+                                align_corners=False).squeeze().squeeze()
+            att_map_prior_ = (att_map_prior_ - att_map_prior_.min()) / (att_map_prior_.max() - att_map_prior_.min())
+            att_map_prior_ = F.sigmoid(alpha_prior * (att_map_prior_ - beta_prior))
+            att_map_prior_ = (att_map_prior_ - att_map_prior_.min()) / (att_map_prior_.max() - att_map_prior_.min())
+            att_map_prior.append(att_map_prior_)
 
     att_map = att_map_prior
     return att_map
@@ -520,6 +543,7 @@ def stable_cascade_inference(
     neg_weight=1.0,
     alpha_prior=8.0,
     beta_prior=0.55,
+    all_masks=False,
 ):
     with torch.no_grad():
         same_seeds(seed)
@@ -573,8 +597,9 @@ def stable_cascade_inference(
                 neg_start_pos = i + 1
                 break
             if pos_start:
-                # pos_positions.append([i + 8])
-                pos_positions.append([i + 4])
+                # pos_positions.append([i + 2])
+                pos_positions.append([i])
+        # pos_positions = [[7]]
         print('positive tokens:', pos_positions, 'cls_name: ', cls_name)
         if negative_token:
             for i, (word, tag) in enumerate(tagged_tokens[neg_start_pos:-1]):
@@ -613,18 +638,17 @@ def stable_cascade_inference(
             beta_decoder=0.4,
             decoder_weight=[0.5, 0.5],
             cls_name=cls_name,
+            all_masks=all_masks,
         )
-        mask = F.interpolate(
-            mask.unsqueeze(0).unsqueeze(0),
-            size=(raw_image.size[1],raw_image.size[0]), mode='bilinear',
-            align_corners=False).squeeze().squeeze()
-
+        
+        for i, m in enumerate(mask):
+            mask[i] = F.interpolate(m.unsqueeze(0).unsqueeze(0), size=(raw_image.size[1],raw_image.size[0]), mode='bilinear', align_corners=False).squeeze().squeeze()
+            
         if verbose:
-            cam = show_cam_on_image(raw_image, mask)
-            print("visual_cam")
+            cam = show_cam_on_image(raw_image, mask[0])
+            print("visual_cam of the first mask")
             pil_img = Image.fromarray(cam[:,:,::-1])
             pil_img.save('cam_{}.pdf'.format(cls_name))
-
         del img_tensor
         torch.cuda.empty_cache()
 
@@ -652,6 +676,7 @@ def domain_test(
     alpha_prior=8.0,
     beta_prior=0.55,
     single_image=False,
+    all_masks=False,
 ):
     start = time.time()
 
@@ -673,7 +698,7 @@ def domain_test(
     for img_file in os.listdir(images_dir):
         if not (img_file.endswith('.png') or img_file.endswith('.tif') or img_file.endswith('.jpg')):
             continue
-        if single_image and not (img_file == '9.png'):
+        if single_image and not (img_file == '22.png'):
             continue
             print(img_file)
         img_path = os.path.join(images_dir, img_file)
@@ -698,13 +723,15 @@ def domain_test(
                 neg_weight=neg_weight,
                 alpha_prior=alpha_prior,
                 beta_prior=beta_prior,
+                all_masks=all_masks,
             )
-            with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], cls_name)), 'wb') as f:
-                np.save(f, mask)
-            for mask_threshold in thres_list:
-                mask_binary = np.where(mask > mask_threshold, 255, 0)
-                mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
-                mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], cls_name)))
+            for mask_idx, m in enumertate(mask):
+                with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], cls_name, mask_idx)), 'wb') as f:
+                    np.save(f, m)
+                for mask_threshold in thres_list:
+                    mask_binary = np.where(m > mask_threshold, 255, 0)
+                    mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
+                    mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}_{}.png'.format(img_file.split('.')[0], cls_name, mask_idx)))
 
             if augmented_label:
                 for aug_cls_name in seg_classes[cls_name]:
@@ -724,13 +751,15 @@ def domain_test(
                         neg_weight=neg_weight,
                         alpha_prior=alpha_prior,
                         beta_prior=beta_prior,
+                        all_masks=all_masks,
                     )
-                    with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name)), 'wb') as f:
-                        np.save(f, mask)
-                    for mask_threshold in thres_list:
-                        mask_binary = np.where(mask > mask_threshold, 255, 0)
-                        mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
-                        mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], aug_cls_name)))
+                    for mask_idx, m in enumertate(mask):
+                        with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name, mask_idx)), 'wb') as f:
+                            np.save(f, m)
+                        for mask_threshold in thres_list:
+                            mask_binary = np.where(m > mask_threshold, 255, 0)
+                            mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
+                            mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}_{}.png'.format(img_file.split('.')[0], aug_cls_name, mask_idx)))
 
     ds_name = images_dir.split('/')[-2]
     print(">>>>>>>>>> dataset: {}, size: {}, test time: {:.2f}s".format(ds_name, size, time.time() - start))
@@ -790,7 +819,8 @@ def stable_cascade_func(config, args=None):
             neg_weight=config["neg_weight"],
             alpha_prior=config["alpha_prior"],
             beta_prior=config["beta_prior"],
-            single_image=args.single_image
+            single_image=args.single_image,
+            all_masks=args.all_masks,
         )
 
     if not args.single_image:
