@@ -76,7 +76,7 @@ def register_attention_control_sc(model, controller, prior=True):
             hidden_states_attn = norm_x.view(batch_size, channel, height * width).transpose(1, 2)
             q = attn.to_q(hidden_states_attn)
             if attn.norm_cross:
-              print('norm_cross is True')
+            #   print('norm_cross is True')
               kv = attn.norm_encoder_hidden_states(kv)
             k = attn.to_k(kv)
             v = attn.to_v(kv)
@@ -321,11 +321,11 @@ def diffusion_step_prior(
         else:
             timestep_ratio = t.expand(latents.size(0)).to(dtype)
 
-        print("text_encoder_pooled.shape", text_encoder_pooled.shape) # torch.Size([2, 1, 1280])
-        print("text_encoder_hidden_states.shape", text_encoder_hidden_states.shape) # torch.Size([2, 77, 1280])
-        print("image_embeds.shape", image_embeds.shape) # torch.Size([2, 1, 768])
-        print("latents.shape", latents.shape) # torch.Size([1, 16, 24, 24])
-        print("timestep_ratio.shape", timestep_ratio.shape) # torch.Size([1])
+        # print("text_encoder_pooled.shape", text_encoder_pooled.shape) # torch.Size([2, 1, 1280])
+        # print("text_encoder_hidden_states.shape", text_encoder_hidden_states.shape) # torch.Size([2, 77, 1280])
+        # print("image_embeds.shape", image_embeds.shape) # torch.Size([2, 1, 768])
+        # print("latents.shape", latents.shape) # torch.Size([1, 16, 24, 24])
+        # print("timestep_ratio.shape", timestep_ratio.shape) # torch.Size([1])
         predicted_image_embedding = prior.prior(
             sample=torch.cat([latents] * 2),
             timestep_ratio= torch.cat([timestep_ratio] * 2),
@@ -503,14 +503,16 @@ def generate_att_sc(
         torch.cuda.empty_cache()
     else:
         assert len(imgs) == 1
-        cross_att_maps = imgs[0]
+        # print("imgs[0].shape", imgs[0].shape)
+        cross_att_maps = imgs[0].reshape(-1, 24*24)
         att_map_prior = []
         tokens = prior.tokenizer.encode(prompts[0])
-        print("num tokens", len(tokens))
+        # print("num tokens", len(tokens))
+        # print("cros_att_maps.shape", cross_att_maps.shape)
+        self_att = self_attention_maps_prior[-1].view(24*24, 24*24).float()
+        self_att = self_att / self_att.max()
         for i in range(len(tokens)):
-            cross_att_map = cross_att_maps[i].mean(0).view(24*24, 1)
-            self_att = self_attention_maps_prior[-1].view(24*24, 24*24).float()
-            self_att = self_att / self_att.max()
+            cross_att_map = cross_att_maps[i]
             cross_att_map = torch.matmul(self_att, cross_att_map)
             att_map_prior_ = cross_att_map.view(24, 24)
             att_map_prior_ = F.interpolate(att_map_prior_.unsqueeze(0).unsqueeze(0),
@@ -600,7 +602,7 @@ def stable_cascade_inference(
                 # pos_positions.append([i + 2])
                 pos_positions.append([i])
         # pos_positions = [[7]]
-        print('positive tokens:', pos_positions, 'cls_name: ', cls_name)
+        # print('positive tokens:', pos_positions, 'cls_name: ', cls_name)
         if negative_token:
             for i, (word, tag) in enumerate(tagged_tokens[neg_start_pos:-1]):
                 if tag.startswith('N'):
@@ -725,7 +727,7 @@ def domain_test(
                 beta_prior=beta_prior,
                 all_masks=all_masks,
             )
-            for mask_idx, m in enumertate(mask):
+            for mask_idx, m in enumerate(mask):
                 with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], cls_name, mask_idx)), 'wb') as f:
                     np.save(f, m)
                 for mask_threshold in thres_list:
@@ -753,7 +755,7 @@ def domain_test(
                         beta_prior=beta_prior,
                         all_masks=all_masks,
                     )
-                    for mask_idx, m in enumertate(mask):
+                    for mask_idx, m in enumerate(mask):
                         with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name, mask_idx)), 'wb') as f:
                             np.save(f, m)
                         for mask_threshold in thres_list:

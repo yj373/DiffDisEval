@@ -58,8 +58,8 @@ def show_cross_attention(prompts, tokenizer, attention_store: AttentionStore, pa
     attention_maps = aggregate_attention(prompts, attention_store, res, from_where, True, select)
     images = []
     j = 0
-    print("number of tokens", len(tokens))
-    print("attention maps shape", attention_maps.shape)
+    # print("number of tokens", len(tokens))
+    # print("attention maps shape", attention_maps.shape)
     for i in range(len(tokens)):
         image = attention_maps[:, :, i]
         image = 255 * image / image.max()

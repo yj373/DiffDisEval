@@ -58,6 +58,11 @@ def parse_args():
         help="whether to only run a single trial",
     )
     parser.add_argument(
+        "--all_masks",
+        action='store_true',
+        help="whether to try all the tokens",
+    )
+    parser.add_argument(
         "--num_cpu",
         type=int,
         default=4,
