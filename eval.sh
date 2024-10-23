@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 nohup python -u main_classic_eval.py --diffusion_model_name stable-diffusion-v1-4 --output_dir /dev/shm/alexJiang/output/DiffDisEval/SD1_4/generated_images_1 --seed 3407 > SD1_4_eval_1.log 2>&1 &

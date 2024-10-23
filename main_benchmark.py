@@ -119,8 +119,8 @@ def main(args):
         search_space = {
             't': tune.uniform(90, 110),
             'neg_weight': tune.uniform(0, 0),
-            'alpha_prior': tune.uniform(0, 20),
-            'beta_prior': tune.uniform(0, 1),
+            'alpha_prior': tune.uniform(5, 10),
+            'beta_prior': tune.uniform(0.2, 1),
         }
         reporter = CLIReporter()
         reporter.max_report_frequency = 60
@@ -139,10 +139,10 @@ def main(args):
     else:
         search_space = {
             't': tune.uniform(50, 150),
-            'map_weight1': tune.uniform(0, 1),
-            'map_weight2': tune.uniform(0, 1),
-            'map_weight3': tune.uniform(0, 1),
-            'map_weight4': tune.uniform(0, 1),
+            'map_weight1': tune.uniform(0.3, 0.3),
+            'map_weight2': tune.uniform(0.5, 0.5),
+            'map_weight3': tune.uniform(0.1, 0.1),
+            'map_weight4': tune.uniform(0.1, 0.1),
             'alpha': tune.uniform(1, 10),
             'beta': tune.uniform(0, 1),
         }
@@ -153,7 +153,7 @@ def main(args):
             tune.with_resources(tune.with_parameters(stable_diffusion_func, args=args), resources={"cpu": args.num_cpu, "gpu": args.num_gpu}),
             param_space=search_space,
             tune_config=tune.TuneConfig(search_alg=OptunaSearch(), metric="f1_auc", mode="max", num_samples=args.num_runs),
-            run_config=RunConfig(progress_reporter=reporter),
+            # run_config=RunConfig(progress_reporter=reporter),
         )
     results = tuner.fit()
     best_result = results.get_best_result("f1_auc", "max")

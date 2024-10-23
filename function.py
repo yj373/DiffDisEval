@@ -248,7 +248,7 @@ def text2image_ldm_stable(
 
 def generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_positions, device,
                  is_self=True, is_multi_self=False, is_cross_norm=True, weight=[0.3,0.5,0.1,0.1],
-                 height=None, width=None, verbose=False, alpha=8, beta=0.4, neg_positions=[], neg_weight=1.0, cls_name=''):
+                 height=None, width=None, verbose=False, alpha=8, beta=0.4, neg_positions=[], neg_weight=1.0, cls_name='', all_masks=False):
 
     ## pos: position of the target class word int he prompt
     controller.reset()
@@ -277,38 +277,58 @@ def generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_po
         imgs.append(out_att * weight[idx])
 
     # aggregated cross attention map
-    cross_att_map = torch.stack(imgs).sum(0)[pos_positions[0]].mean(0).view(64*64, 1)
-    for pos in pos_positions[1:]:
-        cross_att_map += torch.stack(imgs).sum(0)[pos].mean(0).view(64*64, 1)
-    if len(pos_positions) > 1:
-        cross_att_map /= len(pos_positions)
+    if not all_masks:
+        cross_att_map = torch.stack(imgs).sum(0)[pos_positions[0]].mean(0).view(64*64, 1)
+        for pos in pos_positions[1:]:
+            cross_att_map += torch.stack(imgs).sum(0)[pos].mean(0).view(64*64, 1)
+        if len(pos_positions) > 1:
+            cross_att_map /= len(pos_positions)
 
-    if len(neg_positions) > 0:
-        cross_att_map_neg = torch.zeros_like(cross_att_map)
-        for pos in neg_positions:
-            cross_att_map_neg += torch.stack(imgs).sum(0)[pos].mean(0).view(64*64, 1)
-        cross_att_map_neg /= len(neg_positions)
-        cross_att_map -= neg_weight * cross_att_map_neg
+        if len(neg_positions) > 0:
+            cross_att_map_neg = torch.zeros_like(cross_att_map)
+            for pos in neg_positions:
+                cross_att_map_neg += torch.stack(imgs).sum(0)[pos].mean(0).view(64*64, 1)
+            cross_att_map_neg /= len(neg_positions)
+            cross_att_map -= neg_weight * cross_att_map_neg
 
-    # refine cross attention map with self attention map
-    if is_self and not is_multi_self:
-        self_att = self_attention_maps[3].view(64*64,64*64).float()
-        self_att = self_att/self_att.max()
-        for i in range(1):
+        # refine cross attention map with self attention map
+        if is_self and not is_multi_self:
+            self_att = self_attention_maps[3].view(64*64,64*64).float()
+            self_att = self_att/self_att.max()
+            for i in range(1):
+                cross_att_map = torch.matmul(self_att, cross_att_map)
+        # res here is the highest resulution iterated in previous for loop, 64
+        att_map = cross_att_map.view(res,res)
+        att_map = F.interpolate(att_map.unsqueeze(0).unsqueeze(0), size=(512,512), mode='bilinear', align_corners=False).squeeze().squeeze()
+        att_map = (att_map - att_map.min()) / (att_map.max() - att_map.min())
+        att_map = F.sigmoid(alpha * (att_map - beta))
+        att_map = (att_map-att_map.min()) / (att_map.max()-att_map.min())
+        att_map = [att_map]
+
+        del cross_att_map
+        torch.cuda.empty_cache()
+    else:
+        assert len(imgs) == 1
+        cross_att_maps = imgs[0].reshape(-1, 64*64)
+        att_map = []
+        tokens = ldm_stable.tokenizer.encode(prompts[0])
+        self_att = self_attention_maps[3].view(64*64, 64*64).float()
+        self_att = self_att / self_att.max()
+        for i in range(len(tokens)):
+            cross_att_map = cross_att_maps[i]
             cross_att_map = torch.matmul(self_att, cross_att_map)
-    # res here is the highest resulution iterated in previous for loop, 64
-    att_map = cross_att_map.view(res,res)
-    att_map = F.interpolate(att_map.unsqueeze(0).unsqueeze(0), size=(512,512), mode='bilinear', align_corners=False).squeeze().squeeze()
-    att_map = (att_map - att_map.min()) / (att_map.max() - att_map.min())
-    att_map = F.sigmoid(alpha * (att_map - beta))
-    att_map = (att_map-att_map.min()) / (att_map.max()-att_map.min())
-
-    del cross_att_map
-    torch.cuda.empty_cache()
+            att_map_ = cross_att_map.view(64, 64)
+            att_map_ = F.interpolate(att_map_.unsqueeze(0).unsqueeze(0),
+                                size=(512, 512),
+                                mode='bilinear',
+                                align_corners=False).squeeze().squeeze()
+            att_map_ = (att_map_ - att_map_.min()) / (att_map_.max() - att_map_.min())
+            att_map_ = F.sigmoid(alpha * (att_map_- beta))
+            att_map_ = (att_map_ - att_map_.min()) / (att_map_.max() - att_map_.min())
+            att_map.append(att_map_)
 
     if verbose:
-        att_map_map = Image.fromarray((att_map.cpu().detach().numpy()*255).astype(np.uint8), mode="L")
-        palette_image = att_map_map.convert('P')
+        # att_map_map = Image.fromarray((att_map[0].cpu().detach().numpy()*255).astype(np.uint8), mode="L")
         palette = create_palette('viridis')
         tokenizer = ldm_stable.tokenizer
         print("8x8 cross att map")
@@ -323,7 +343,7 @@ def generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_po
     return att_map
 
 
-def stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=[0.3,0.5,0.1,0.1], t=100, alpha=8, beta=0.4, seed=3407, negative_token=False):
+def stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=[0.3,0.5,0.1,0.1], t=100, alpha=8, beta=0.4, seed=3407, negative_token=False, all_masks=False):
   ## img_path: path to the target image
   ## cls name: taget class in the prompt
   ## device: device of stable diffusion model
@@ -400,8 +420,9 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
         # print(pos_positions)
         mask = generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_positions, device,
                         is_self=True, is_multi_self=False, is_cross_norm=True, weight=weight, height=height, width=width,
-                        verbose=verbose, alpha=alpha, beta=beta, neg_positions=neg_positions, cls_name=cls_name)
-        mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=(raw_image.size[1],raw_image.size[0]), mode='bilinear', align_corners=False).squeeze().squeeze()
+                        verbose=verbose, alpha=alpha, beta=beta, neg_positions=neg_positions, cls_name=cls_name, all_masks=all_masks)
+        for i, m in enumerate(mask):
+            mask[i] = F.interpolate(m.unsqueeze(0).unsqueeze(0), size=(raw_image.size[1],raw_image.size[0]), mode='bilinear', align_corners=False).squeeze().squeeze()
     
         if verbose:
             left = (raw_image.size[0] - 400)/2
@@ -411,7 +432,7 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
 
             # Crop the center of the image
             raw_image = raw_image.crop((left, top, right, bottom))
-            cam = show_cam_on_image(raw_image, mask)
+            cam = show_cam_on_image(raw_image, mask[0])
             print("visual_cam")
             pil_img = Image.fromarray(cam[:,:,::-1])
             # display(pil_img)
@@ -424,7 +445,7 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
 
 
 def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
-        augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, seed=3407, negative_token=False):
+        augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, seed=3407, negative_token=False, all_masks=False):
 
     start = time.time()
     if os.path.isdir(result_dir):
@@ -451,23 +472,25 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
         seg_classes = label_data[img_path[dataset_root_length:]]
 
         for cls_name in seg_classes.keys():
-            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token)
-            with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], cls_name)), 'wb') as f:
-                np.save(f, mask)
-            for mask_threshold in thres_list:
-                mask_binary = np.where(mask > mask_threshold, 255, 0)
-                mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
-                mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], cls_name)))
-
-        if augmented_label:
-            for aug_cls_name in seg_classes[cls_name]:
-                mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token)
-                with open(os.path.join(result_dir, 'mask', '{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name)), 'wb') as f:
-                    np.save(f, mask)
+            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token, all_masks=all_masks)
+            for mask_idx, m in enumerate(mask):
+                with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], cls_name, mask_idx)), 'wb') as f:
+                    np.save(f, m)
                 for mask_threshold in thres_list:
-                    mask_binary = np.where(mask > mask_threshold, 255, 0)
+                    mask_binary = np.where(m > mask_threshold, 255, 0)
                     mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
-                    mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}.png'.format(img_file.split('.')[0], aug_cls_name)))
+                    mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}_{}.png'.format(img_file.split('.')[0], cls_name, mask_idx)))
+
+            if augmented_label:
+                for aug_cls_name in seg_classes[cls_name]:
+                    mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token, all_masks=all_masks)
+                    for mask_idx, m in enumerate(mask):
+                        with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name, mask_idx)), 'wb') as f:
+                            np.save(f, m)
+                        for mask_threshold in thres_list:
+                            mask_binary = np.where(m > mask_threshold, 255, 0)
+                            mask_binary_img = Image.fromarray(mask_binary.astype(np.uint8))
+                            mask_binary_img.save(os.path.join(result_dir, '{}'.format(mask_threshold), '{}_{}_{}.png'.format(img_file.split('.')[0], aug_cls_name, mask_idx)))
     # gt_path = os.path.join(images_dir.replace('images', 'segmentations'), img_file)
     # gt = Image.open(gt_path)
     # display(gt)

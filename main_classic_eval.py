@@ -4,6 +4,7 @@ import shutil
 import argparse
 import ImageReward as RM
 import hpsv2
+import numpy as np
 
 from diffusers import StableDiffusionPipeline, DiffusionPipeline, StableCascadeDecoderPipeline, StableCascadePriorPipeline
 
@@ -77,18 +78,32 @@ def parse_args():
         "--num_images_per_prompt",
         type=int,
         default=4,
-        required=True,
         help="number of generated images for each prompt",
     )
     parser.add_argument(
         "--num_prompts",
         type=int,
         default=25,
-        required=True,
         help="number of prompts used to synthesize images",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=3407,
+        help="random seed"
     )
     args = parser.parse_args()
     return args
+
+
+def same_seeds(seed):
+    torch.manual_seed(seed)  
+    if torch.cuda.is_available():  
+        torch.cuda.manual_seed(seed)  
+        torch.cuda.manual_seed_all(seed)  
+    np.random.seed(seed)  
+    torch.backends.cudnn.benchmark = False  
+    torch.backends.cudnn.deterministic = True 
 
 
 def generate_images(args):
@@ -97,7 +112,7 @@ def generate_images(args):
     if os.path.isdir(args.output_dir):
         shutil.rmtree(args.output_dir)
     os.mkdir(args.output_dir)
-    if args.diffusion_model_name.startswith("stble-diffusion"):
+    if args.diffusion_model_name.startswith("stable-diffusion") or args.diffusion_model_name == "openjourney":
         pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
         pipe = pipe.to("cuda")
 
@@ -129,8 +144,8 @@ def generate_images(args):
                     prompt=prompt,
                     height=512,
                     width=512,
-                    num_inference_steps=n_steps,
-                    denoising_start=high_noise_frac,
+                    num_inference_steps=50,
+                    denoising_start=0.8,
                     image=image,
                 ).images[0]
                 image.save(os.path.join(args.output_dir, "{}-{}.png".format(i, j)))
@@ -199,10 +214,14 @@ def hps(args, dir_list):
 
 def main():
     args = parse_args()
+    same_seeds(args.seed)
     if args.generate_images:
         generate_images(args)
     else:
         assert os.path.isdir(args.output_dir) and len(os.listdir(args.output_dir)) == args.num_prompts * args.num_images_per_prompt
+
+    image_reward(args, [args.output_dir])
+    hps(args, [args.output_dir])
 
 
 if __name__ == '__main__':
