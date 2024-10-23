@@ -220,8 +220,8 @@ def main():
     else:
         assert os.path.isdir(args.output_dir) and len(os.listdir(args.output_dir)) == args.num_prompts * args.num_images_per_prompt
 
-    image_reward(args, [args.output_dir])
-    hps(args, [args.output_dir])
+    # image_reward(args, [args.output_dir])
+    # hps(args, [args.output_dir])
 
 
 if __name__ == '__main__':

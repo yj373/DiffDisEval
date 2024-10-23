@@ -445,7 +445,8 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
 
 
 def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
-        augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, seed=3407, negative_token=False, all_masks=False):
+        augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, 
+        seed=3407, negative_token=False, single_image=False, all_masks=False):
 
     start = time.time()
     if os.path.isdir(result_dir):
@@ -461,10 +462,14 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
         label_data = json.load(f)
 
     size = 0
+    verbose = single_image
     print('>>> seed: {}'.format(seed))
     for img_file in os.listdir(images_dir):
         if not (img_file.endswith('.png') or img_file.endswith('.tif') or img_file.endswith('.jpg')):
             continue
+        if single_image and not (img_file == '22.png'):
+            continue
+            print(img_file)
         img_path = os.path.join(images_dir, img_file)
         img = Image.open(img_path)
         
@@ -472,7 +477,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
         seg_classes = label_data[img_path[dataset_root_length:]]
 
         for cls_name in seg_classes.keys():
-            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token, all_masks=all_masks)
+            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=verbose, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token, all_masks=all_masks)
             for mask_idx, m in enumerate(mask):
                 with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], cls_name, mask_idx)), 'wb') as f:
                     np.save(f, m)
@@ -483,7 +488,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
 
             if augmented_label:
                 for aug_cls_name in seg_classes[cls_name]:
-                    mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token, all_masks=all_masks)
+                    mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=verbose, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, negative_token=negative_token, all_masks=all_masks)
                     for mask_idx, m in enumerate(mask):
                         with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name, mask_idx)), 'wb') as f:
                             np.save(f, m)
@@ -633,8 +638,8 @@ def stable_diffusion_func(config, args=None):
     processor = BlipProcessor.from_pretrained(args.BLIP)
     model = BlipForConditionalGeneration.from_pretrained(args.BLIP).to(device)
     dataset_names = ["VOC2012", "Cityscape", "Vaihingen", "Kvasir-SEG"]
-    datasets = [os.path.join(args.dataset_root, ds) for ds in dataset_names]
-    label_maps = [VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map]
+    datasets = [os.path.join(args.dataset_root, ds) for ds in dataset_names] if not args.single_image else [os.path.join(args.dataset_root, "VOC2012")]
+    label_maps = [VOC_label_map, Cityscape_label_map, Vaihingen_label_map, Kvasir_label_map] if not args.single_image else [VOC_label_map]
     map_weight_sum = config["map_weight1"] + config["map_weight2"] + config["map_weight3"] + config["map_weight4"]
     map_weight1_ = config["map_weight1"] / map_weight_sum
     map_weight2_ = config["map_weight2"] / map_weight_sum
@@ -658,11 +663,22 @@ def stable_diffusion_func(config, args=None):
         # print(">>>")
         # print(result_dir)
         domain_test(processor, model, ldm_stable, device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
-            augmented_label=True, thres_list=thres_list, weight=weight, t=int(config["t"]), alpha=config["alpha"], beta=config["beta"], seed=args.seed, negative_token=args.negative_token)
+            augmented_label=True, thres_list=thres_list, weight=weight, t=int(config["t"]), alpha=config["alpha"], beta=config["beta"], seed=args.seed, 
+            negative_token=args.negative_token, single_image=args.single_image, all_masks=args.all_masks)
+        
+    if not args.single_image:
+        results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
+        segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
+        f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list)
 
-    results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
-    segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
-    f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list)
+        train.report({
+            "f1_auc": f1_auc,
+            "f1_optim": f1_optim,
+            "iou_auc": iou_auc,
+            "iou_optim": iou_optim,
+            "pixel_auc": pixel_auc,
+            "pixel_optim": pixel_optim
+        })
 
     del ldm_stable
     del model
@@ -670,11 +686,4 @@ def stable_diffusion_func(config, args=None):
     torch.cuda.empty_cache()
     shutil.rmtree(root_dir)
 
-    train.report({
-        "f1_auc": f1_auc,
-        "f1_optim": f1_optim,
-        "iou_auc": iou_auc,
-        "iou_optim": iou_optim,
-        "pixel_auc": pixel_auc,
-        "pixel_optim": pixel_optim
-    })
+    

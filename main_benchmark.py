@@ -86,6 +86,42 @@ def parse_args():
         default=3407,
         help="random seed"
     )
+    parser.add_argument(
+        "--t",
+        type=int,
+        default=100,
+        help="hyperparameter t"
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=8.0,
+        help="hyperparameter alpha"
+    )
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=0.4,
+        help="hyperparameter beta"
+    )
+    parser.add_argument(
+        "--neg_weight",
+        type=float,
+        default=0.0,
+        help="hyperparameter neg_weight"
+    )
+    parser.add_argument(
+        "--alpha_prior",
+        type=float,
+        default=0.4,
+        help="hyperparameter alpha_prior"
+    )
+    parser.add_argument(
+        "--beta_prior",
+        type=float,
+        default=0.4,
+        help="hyperparameter beta_prior"
+    )
     args = parser.parse_args()
     return args
 
@@ -171,21 +207,21 @@ def main_single(args):
 
     if args.diffusion_model.endswith("stable-cascade"):
         config = {
-            "t": 100,
-            "neg_weight": 0.0,
-            "alpha_prior": 8,
-            "beta_prior": 0.8,
+            "t": args.t,
+            "neg_weight": args.neg_weight,
+            "alpha_prior": args.alpha_prior,
+            "beta_prior": args.beta_prior,
         }
         stable_cascade_func(config, args)
     else:
         config = {
-            "t": 100,
+            "t": args.t,
             'map_weight1': 0.3,
             "map_weight2": 0.5,
             "map_weight3": 0.1,
             "map_weight4": 0.1,
-            'alpha': 8,
-            'beta': 0.4,
+            'alpha': args.alpha,
+            'beta': args.beta,
         }
         stable_diffusion_func(config, args)
 
