@@ -73,7 +73,7 @@ def show_cross_attention(prompts, tokenizer, attention_store: AttentionStore, pa
         j+=1
         if j >= len(tokens):
             break
-    view_images(np.stack(images, axis=0), palette, name='output_{}.pdf'.format(cls_name))
+    view_images(np.stack(images, axis=0), palette, name='output_{}_{}.pdf'.format(cls_name, res))
 
 
 # visualize self att

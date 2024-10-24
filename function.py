@@ -308,8 +308,8 @@ def generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_po
         del cross_att_map
         torch.cuda.empty_cache()
     else:
-        assert len(imgs) == 1
-        cross_att_maps = imgs[0].reshape(-1, 64*64)
+        # assert len(imgs) == 1
+        cross_att_maps = torch.stack(imgs).sum(0).reshape(-1, 64*64)
         att_map = []
         tokens = ldm_stable.tokenizer.encode(prompts[0])
         self_att = self_attention_maps[3].view(64*64, 64*64).float()
@@ -436,7 +436,7 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
             print("visual_cam")
             pil_img = Image.fromarray(cam[:,:,::-1])
             # display(pil_img)
-            pil_img.save('cam.pdf')
+            pil_img.save('cam_{}.pdf'.format(cls_name))
         del img_tensor
         del noise
         del inputs

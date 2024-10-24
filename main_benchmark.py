@@ -179,8 +179,8 @@ def main(args):
             'map_weight2': tune.uniform(0.5, 0.5),
             'map_weight3': tune.uniform(0.1, 0.1),
             'map_weight4': tune.uniform(0.1, 0.1),
-            'alpha': tune.uniform(1, 10),
-            'beta': tune.uniform(0, 1),
+            'alpha': tune.uniform(10, 20),
+            'beta': tune.uniform(0.5, 1),
         }
     
         reporter = CLIReporter()
