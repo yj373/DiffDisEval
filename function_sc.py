@@ -500,6 +500,7 @@ def generate_att_sc(
         att_map_prior = (att_map_prior - att_map_prior.min()) / (att_map_prior.max() - att_map_prior.min())
         att_map_prior = [att_map_prior]
         del cross_att_map
+        del self_attention_maps_prior
         torch.cuda.empty_cache()
     else:
         assert len(imgs) == 1
@@ -523,6 +524,10 @@ def generate_att_sc(
             att_map_prior_ = F.sigmoid(alpha_prior * (att_map_prior_ - beta_prior))
             att_map_prior_ = (att_map_prior_ - att_map_prior_.min()) / (att_map_prior_.max() - att_map_prior_.min())
             att_map_prior.append(att_map_prior_)
+
+        del cross_att_maps
+        del self_attention_maps_prior
+        torch.cuda.empty_cache()
 
     att_map = att_map_prior
     return att_map
@@ -603,12 +608,10 @@ def stable_cascade_inference(
                 pos_positions.append([i])
         # pos_positions = [[7]]
         # print('positive tokens:', pos_positions, 'cls_name: ', cls_name)
-        if negative_token:
-            for i, (word, tag) in enumerate(tagged_tokens[neg_start_pos:-1]):
-                if tag.startswith('N'):
-                    if word != cls_name:
-                        # print(word)
-                        neg_positions.append([i + neg_start_pos])
+        for i, (word, tag) in enumerate(tagged_tokens[neg_start_pos:-1]):
+            if tag.startswith('N'):
+                if word != cls_name:
+                    neg_positions.append([i + neg_start_pos])
       
 
         controller_prior = AttentionStore()
@@ -632,7 +635,7 @@ def stable_cascade_inference(
             height_vqgan=height_vqgan,
             width_vqgan=width_vqgan,
             verbose=verbose,
-            neg_positions = neg_positions,
+            neg_positions=neg_positions,
             neg_weight=neg_weight,
             alpha_prior=alpha_prior,
             beta_prior=beta_prior,

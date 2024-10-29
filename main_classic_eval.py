@@ -2,8 +2,8 @@ import torch
 import os
 import shutil
 import argparse
-import ImageReward as RM
-import hpsv2
+# import ImageReward as RM
+# import hpsv2
 import numpy as np
 
 from diffusers import StableDiffusionPipeline, DiffusionPipeline, StableCascadeDecoderPipeline, StableCascadePriorPipeline
@@ -112,7 +112,7 @@ def generate_images(args):
     if os.path.isdir(args.output_dir):
         shutil.rmtree(args.output_dir)
     os.mkdir(args.output_dir)
-    if args.diffusion_model_name.startswith("stable-diffusion") or args.diffusion_model_name == "openjourney":
+    if args.diffusion_model_name in ["SD1_4", "SD1_5", "openjourney"]:
         pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
         pipe = pipe.to("cuda")
 
@@ -181,35 +181,35 @@ def generate_images(args):
         print("unsupported diffusion model: {}".format(args.diffusion_model_name))
 
 
-def image_reward(args, dir_list):
-    prompts = PROMPTS[:args.num_prompts]
-    model = RM.load("ImageReward-v1.0")
-    score_list = [0] * len(dir_list)
-    for i, prompt in enumerate(prompts):
-        for j in range(args.num_images_per_prompt):
-            img_list = [os.path.join(dir, '{}-{}.png'.format(i, j)) for dir in dir_list]
-            with torch.no_grad():
-                ranking, rewards = model.inference_rank(prompt, img_list)
-                print("\nPreference predictions:\n")
-                print(f"ranking = {ranking}")
-                print(f"rewards = {rewards}")
-                for index in range(len(img_list)):
-                    score = model.score(prompt, img_list[index])
-                    print(f"{img_list[index]}: {score:.2f}")
-                    score_list[index] += score / 1000.
-    print(score_list)
+# def image_reward(args, dir_list):
+#     prompts = PROMPTS[:args.num_prompts]
+#     model = RM.load("ImageReward-v1.0")
+#     score_list = [0] * len(dir_list)
+#     for i, prompt in enumerate(prompts):
+#         for j in range(args.num_images_per_prompt):
+#             img_list = [os.path.join(dir, '{}-{}.png'.format(i, j)) for dir in dir_list]
+#             with torch.no_grad():
+#                 ranking, rewards = model.inference_rank(prompt, img_list)
+#                 print("\nPreference predictions:\n")
+#                 print(f"ranking = {ranking}")
+#                 print(f"rewards = {rewards}")
+#                 for index in range(len(img_list)):
+#                     score = model.score(prompt, img_list[index])
+#                     print(f"{img_list[index]}: {score:.2f}")
+#                     score_list[index] += score / 1000.
+#     print(score_list)
 
 
-def hps(args, dir_list):
-    prompts = PROMPTS[:args.num_prompts]
-    score_list = [0] * len(dir_list)
-    for i, prompt in enumerate(prompts):
-        for j in range(args.num_images_per_prompt):
-            img_list = [os.path.join(dir, '{}-{}.png'.format(i, j)) for dir in dir_list]
-            scores = hpsv2.score(img_list, prompt, hps_version="v2.1")
-            for index in range(len(img_list)):
-                score_list[index] += scores[index]
-    print(score_list)
+# def hps(args, dir_list):
+#     prompts = PROMPTS[:args.num_prompts]
+#     score_list = [0] * len(dir_list)
+#     for i, prompt in enumerate(prompts):
+#         for j in range(args.num_images_per_prompt):
+#             img_list = [os.path.join(dir, '{}-{}.png'.format(i, j)) for dir in dir_list]
+#             scores = hpsv2.score(img_list, prompt, hps_version="v2.1")
+#             for index in range(len(img_list)):
+#                 score_list[index] += scores[index]
+#     print(score_list)
 
 
 def main():

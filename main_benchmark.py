@@ -42,11 +42,11 @@ def parse_args():
         default="/dev/shm/alexJiang/source/BLIP",
         help="directory containing the BLIP model",
     )
-    parser.add_argument(
-        "--negative_token",
-        action='store_true',
-        help="whether to use negative token",
-    )
+    # parser.add_argument(
+    #     "--negative_token",
+    #     action='store_true',
+    #     help="whether to use negative token",
+    # )
     parser.add_argument(
         "--single_run",
         action='store_true',
@@ -122,6 +122,16 @@ def parse_args():
         default=0.4,
         help="hyperparameter beta_prior"
     )
+    parser.add_argument(
+        "--lr_flip",
+        action='store_true',
+        help="whether to flip the input image left to right",
+    )
+    parser.add_argument(
+        "--ud_flip",
+        action='store_true',
+        help="whether to flip the input image up to down",
+    )
     args = parser.parse_args()
     return args
 
@@ -174,13 +184,14 @@ def main(args):
         # ))
     else:
         search_space = {
-            't': tune.uniform(50, 150),
+            't': tune.uniform(80, 120),
             'map_weight1': tune.uniform(0.3, 0.3),
             'map_weight2': tune.uniform(0.5, 0.5),
             'map_weight3': tune.uniform(0.1, 0.1),
             'map_weight4': tune.uniform(0.1, 0.1),
+            'neg_weight': tune.uniform(-2, 2),
             'alpha': tune.uniform(10, 20),
-            'beta': tune.uniform(0.5, 1),
+            'beta': tune.uniform(0.5, 0.9),
         }
     
         reporter = CLIReporter()
@@ -220,6 +231,7 @@ def main_single(args):
             "map_weight2": 0.5,
             "map_weight3": 0.1,
             "map_weight4": 0.1,
+            "neg_weight": args.neg_weight,
             'alpha': args.alpha,
             'beta': args.beta,
         }
