@@ -514,7 +514,8 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
     print(">>>>>>>>>> dataset: {}, size: {}, test time: {:.2f}s".format(ds_name, size, time.time() - start))
 
 
-def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], lr_flip=False, ud_flip=False):
+def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], 
+             lr_flip=False, ud_flip=False, augmented_label=False):
     start = time.time()
 
     iou_res_ = {}
@@ -551,7 +552,7 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dat
                 if not(seg_file.endswith('.png') or seg_file.endswith('.tif') or seg_file.endswith('.jpg')):
                     continue
                 img_path = os.path.join(images_dir, seg_file)
-                seg_classes = label_data[img_path[dataset_root_length:]]
+                seg_classes = label_data[img_path[dataset_root_length:]] if augmented_label else []
 
                 for cls_name in seg_classes.keys():
                     all_classes = [cls_name] + seg_classes[cls_name]
@@ -668,7 +669,7 @@ def stable_diffusion_func(config, args=None):
     thres_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     if os.path.isdir(root_dir):
         shutil.rmtree(root_dir)
-    os.mkdir(root_dir)
+    os.makedirs(root_dir)
     augmented_label_file = 'aug_label_blip_bert_0.9.json'
     dataset_root_length = len(args.dataset_root)
     for ds, label_map in zip(datasets, label_maps):
@@ -679,13 +680,13 @@ def stable_diffusion_func(config, args=None):
         # print(">>>")
         # print(result_dir)
         domain_test(processor, model, ldm_stable, device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
-            augmented_label=True, thres_list=thres_list, weight=weight, t=int(config["t"]), alpha=config["alpha"], beta=config["beta"], seed=args.seed, 
+            augmented_label=args.augmented_label, thres_list=thres_list, weight=weight, t=int(config["t"]), alpha=config["alpha"], beta=config["beta"], seed=args.seed, 
             neg_weight=config["neg_weight"], single_image=args.single_image, all_masks=args.all_masks, lr_flip=args.lr_flip, ud_flip=args.ud_flip)
         
     if not args.single_image:
         results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
         segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
-        f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list, lr_flip=args.lr_flip, ud_flip=args.ud_flip)
+        f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list, lr_flip=args.lr_flip, ud_flip=args.ud_flip, augmented_label=args.augmented_label)
 
         train.report({
             "f1_auc": f1_auc,

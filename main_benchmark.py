@@ -123,6 +123,35 @@ def parse_args():
         help="hyperparameter beta_prior"
     )
     parser.add_argument(
+        "--fixed_map_weights",
+        action='store_true',
+        help="whether to fix map weights during the fine-tuning",
+    )
+    parser.add_argument(
+        "--map_weight1",
+        type=float,
+        default=0.3,
+        help="hyperparameter map_weight1"
+    )
+    parser.add_argument(
+        "--map_weight2",
+        type=float,
+        default=0.5,
+        help="hyperparameter map_weight2"
+    )
+    parser.add_argument(
+        "--map_weight3",
+        type=float,
+        default=0.1,
+        help="hyperparameter map_weight3"
+    )
+    parser.add_argument(
+        "--map_weight4",
+        type=float,
+        default=0.1,
+        help="hyperparameter map_weight4"
+    )
+    parser.add_argument(
         "--lr_flip",
         action='store_true',
         help="whether to flip the input image left to right",
@@ -131,6 +160,11 @@ def parse_args():
         "--ud_flip",
         action='store_true',
         help="whether to flip the input image up to down",
+    )
+    parser.add_argument(
+         "--augmented_label",
+        action='store_true',
+        help="whether to augment the label set",
     )
     args = parser.parse_args()
     return args
@@ -183,16 +217,17 @@ def main(args):
         #     best_result["f1_auc"], best_result["f1_optim"], best_result["iou_auc"], best_result["iou_optim"], best_result["pixel_auc"], best_result["pixel_optim"]
         # ))
     else:
-        search_space = {
-            't': tune.uniform(80, 120),
-            'map_weight1': tune.uniform(0.3, 0.3),
-            'map_weight2': tune.uniform(0.5, 0.5),
-            'map_weight3': tune.uniform(0.1, 0.1),
-            'map_weight4': tune.uniform(0.1, 0.1),
-            'neg_weight': tune.uniform(-2, 2),
-            'alpha': tune.uniform(10, 20),
-            'beta': tune.uniform(0.5, 0.9),
-        }
+        if args.fixed_map_weight:
+            search_space = {
+                't': tune.uniform(80, 120),
+                'map_weight1': tune.uniform(args.map_weight1, args.map_weight1),
+                'map_weight2': tune.uniform(args.map_weight2, args.map_weight2),
+                'map_weight3': tune.uniform(args.map_weight3, args.map_weight3),
+                'map_weight4': tune.uniform(args.map_weight4, args.map_weight4),
+                'neg_weight': tune.uniform(-2, 2),
+                'alpha': tune.uniform(10, 20),
+                'beta': tune.uniform(0.5, 0.9),
+            }
     
         reporter = CLIReporter()
         reporter.max_report_frequency = 60
@@ -227,10 +262,10 @@ def main_single(args):
     else:
         config = {
             "t": args.t,
-            'map_weight1': 0.3,
-            "map_weight2": 0.5,
-            "map_weight3": 0.1,
-            "map_weight4": 0.1,
+            'map_weight1': args.map_weight1,
+            "map_weight2": args.map_weight2,
+            "map_weight3": args.map_weight3,
+            "map_weight4": args.map_weight4,
             "neg_weight": args.neg_weight,
             'alpha': args.alpha,
             'beta': args.beta,
