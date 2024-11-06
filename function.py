@@ -348,7 +348,7 @@ def generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_po
 
 
 def stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=False, weight=[0.3,0.5,0.1,0.1], t=100, 
-                                alpha=8, beta=0.4, seed=3407, neg_weight=0.0, all_masks=False, lr_flip=False, ud_flip=False):
+                                alpha=8, beta=0.4, seed=3407, neg_weight=0.0, all_masks=False, lr_flip=False, ud_flip=False, center_cropping=False):
   ## img_path: path to the target image
   ## cls name: taget class in the prompt
   ## device: device of stable diffusion model
@@ -367,6 +367,10 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
             trans.append(transforms.RandomHorizontalFlip(p=1.))
         if ud_flip:
             trans.append(transforms.RandomVerticalFlip(p=1.))
+        if center_cropping:
+            width, height = input_img.size
+            crop = min(width, height)
+            trans.append(transforms.CenterCrop(crop))
         trans = transforms.Compose(trans)
 
         img_tensor = (trans(input_img).unsqueeze(0)).to(device)
@@ -428,8 +432,12 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
         mask = generate_att(t, ldm_stable, input_latent, noise, prompts, controller, pos_positions, device,
                         is_self=True, is_multi_self=False, is_cross_norm=True, weight=weight, height=height, width=width,
                         verbose=verbose, alpha=alpha, beta=beta, neg_positions=neg_positions, neg_weight=neg_weight, cls_name=cls_name, all_masks=all_masks)
+        mask_height, mask_width = raw_image.size[1],raw_image.size[0]
+        if center_cropping:
+            mask_height = min(raw_image.size[1],raw_image.size[0])
+            mask_width = mask_height
         for i, m in enumerate(mask):
-            mask[i] = F.interpolate(m.unsqueeze(0).unsqueeze(0), size=(raw_image.size[1],raw_image.size[0]), mode='bilinear', align_corners=False).squeeze().squeeze()
+            mask[i] = F.interpolate(m.unsqueeze(0).unsqueeze(0), size=(mask_height, mask_width), mode='bilinear', align_corners=False).squeeze().squeeze()
     
         if verbose:
             # left = (raw_image.size[0] - 400)/2
@@ -443,6 +451,14 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
                 raw_image = raw_image.transpose(Image.FLIP_LEFT_RIGHT)
             if ud_flip:
                 raw_image = raw_image.transpose(Image.FLIP_TOP_BOTTOM)
+            if center_cropping:
+                width, height = raw_image.size
+                crop = min(width, height)
+                start_x = max((width - crop) // 2, 0)
+                start_y = max((height - crop) // 2, 0)
+                end_x = start_x + crop
+                end_y = start_y + crop
+                raw_image = raw_image.crop((start_x, start_y, end_x, end_y))
             cam = show_cam_on_image(raw_image, mask[0])
             print("visual_cam")
             pil_img = Image.fromarray(cam[:,:,::-1])
@@ -457,7 +473,7 @@ def stable_diffusion_inference(img_path, cls_name, device, blip_device, processo
 
 def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
         augmented_label=False, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], weight=[0.3,0.5,0.1,0.1], t = 100, alpha=8, beta=0.4, 
-        seed=3407, neg_weight=0.0, single_image=False, all_masks=False, lr_flip=False, ud_flip=False):
+        seed=3407, neg_weight=0.0, single_image=False, all_masks=False, lr_flip=False, ud_flip=False, center_cropping=False):
 
     start = time.time()
     if os.path.isdir(result_dir):
@@ -478,7 +494,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
     for img_file in os.listdir(images_dir):
         if not (img_file.endswith('.png') or img_file.endswith('.tif') or img_file.endswith('.jpg')):
             continue
-        if single_image and not (img_file == '22.png'):
+        if single_image and not (img_file == '321.png'):
             continue
             print(img_file)
         img_path = os.path.join(images_dir, img_file)
@@ -488,7 +504,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
         seg_classes = label_data[img_path[dataset_root_length:]]
 
         for cls_name in seg_classes.keys():
-            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=verbose, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, neg_weight=neg_weight, all_masks=all_masks, lr_flip=lr_flip, ud_flip=ud_flip)
+            mask = stable_diffusion_inference(img_path, cls_name, device, blip_device, processor, model, ldm_stable, verbose=verbose, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, neg_weight=neg_weight, all_masks=all_masks, lr_flip=lr_flip, ud_flip=ud_flip, center_cropping=center_cropping)
             for mask_idx, m in enumerate(mask):
                 with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], cls_name, mask_idx)), 'wb') as f:
                     np.save(f, m)
@@ -499,7 +515,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
 
             if augmented_label:
                 for aug_cls_name in seg_classes[cls_name]:
-                    mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=verbose, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, neg_weight=neg_weight, all_masks=all_masks, lr_flip=lr_flip, ud_flip=ud_flip)
+                    mask = stable_diffusion_inference(img_path, aug_cls_name, device, blip_device, processor, model, ldm_stable, verbose=verbose, weight=weight, t=t, alpha=alpha, beta=beta, seed=seed, neg_weight=neg_weight, all_masks=all_masks, lr_flip=lr_flip, ud_flip=ud_flip, enter_cropping=center_cropping)
                     for mask_idx, m in enumerate(mask):
                         with open(os.path.join(result_dir, 'mask', '{}_{}_{}.npy'.format(img_file.split('.')[0], aug_cls_name, mask_idx)), 'wb') as f:
                             np.save(f, m)
@@ -515,7 +531,7 @@ def domain_test(processor, model, ldm_stable, blip_device, device, images_dir, r
 
 
 def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], 
-             lr_flip=False, ud_flip=False, augmented_label=False):
+             lr_flip=False, ud_flip=False, center_cropping=False, augmented_label=False):
     start = time.time()
 
     iou_res_ = {}
@@ -552,15 +568,26 @@ def analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dat
                 if not(seg_file.endswith('.png') or seg_file.endswith('.tif') or seg_file.endswith('.jpg')):
                     continue
                 img_path = os.path.join(images_dir, seg_file)
-                seg_classes = label_data[img_path[dataset_root_length:]] if augmented_label else []
+                seg_classes = label_data[img_path[dataset_root_length:]]
 
                 for cls_name in seg_classes.keys():
-                    all_classes = [cls_name] + seg_classes[cls_name]
+                    all_classes = [cls_name]
+                    if augmented_label:
+                        all_classes += seg_classes[cls_name]
                     seg_cls_arr = np.load(os.path.join(cls_arr_dir, '{}_{}.npy'.format(seg_file.split('.')[0], cls_name)))
                     if lr_flip:
                         seg_cls_arr = np.fliplr(seg_cls_arr)
                     if ud_flip:
                         seg_cls_arr = np.flipud(seg_cls_arr)
+                    if center_cropping:
+                        height, width = seg_cls_arr.shape[:2]
+                        crop = min(height, width)
+                        start_x = max((width - crop) // 2, 0)
+                        start_y = max((height - crop) // 2, 0)
+                        end_x = start_x + crop
+                        end_y = start_y + crop
+                        seg_cls_arr = seg_cls_arr[start_y:end_y, start_x:end_x]
+
                     iou = -1
                     pixel_acc = -1
                     f1 = -1
@@ -663,8 +690,8 @@ def stable_diffusion_func(config, args=None):
     map_weight4_ = config["map_weight4"] / map_weight_sum
     weight = [map_weight1_, map_weight2_, map_weight3_, map_weight4_]
 
-    res_dir = "results_0.9_{}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{}_{}".format(int(config["t"]), map_weight1_, map_weight2_, map_weight3_, map_weight4_, 
-                    config["alpha"], config["beta"], config["neg_weight"], args.lr_flip, args.ud_flip)
+    res_dir = "results_0.9_{}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{:.2f}_{}_{}_{}".format(int(config["t"]), map_weight1_, map_weight2_, map_weight3_, map_weight4_, 
+                    config["alpha"], config["beta"], config["neg_weight"], args.lr_flip, args.ud_flip, args.center_cropping)
     root_dir = os.path.join(args.output_dir, res_dir)
     thres_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     if os.path.isdir(root_dir):
@@ -681,12 +708,22 @@ def stable_diffusion_func(config, args=None):
         # print(result_dir)
         domain_test(processor, model, ldm_stable, device, device, images_dir, result_dir, label_map, augmented_label_file, dataset_root_length,
             augmented_label=args.augmented_label, thres_list=thres_list, weight=weight, t=int(config["t"]), alpha=config["alpha"], beta=config["beta"], seed=args.seed, 
-            neg_weight=config["neg_weight"], single_image=args.single_image, all_masks=args.all_masks, lr_flip=args.lr_flip, ud_flip=args.ud_flip)
+            neg_weight=config["neg_weight"], single_image=args.single_image, all_masks=args.all_masks, lr_flip=args.lr_flip, ud_flip=args.ud_flip, center_cropping=args.center_cropping)
         
     if not args.single_image:
         results_dir_list = [os.path.join(root_dir, ds) for ds in dataset_names]
         segmentations_dir_list = [os.path.join(ds, "segmentations") for ds in datasets]
-        f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(results_dir_list, segmentations_dir_list, augmented_label_file, dataset_root_length, thres_list=thres_list, lr_flip=args.lr_flip, ud_flip=args.ud_flip, augmented_label=args.augmented_label)
+        f1_auc, f1_optim, iou_auc, iou_optim, pixel_auc, pixel_optim = analysis(
+            results_dir_list, 
+            segmentations_dir_list, 
+            augmented_label_file, 
+            dataset_root_length, 
+            thres_list=thres_list, 
+            lr_flip=args.lr_flip, 
+            ud_flip=args.ud_flip, 
+            center_cropping=args.center_cropping,
+            augmented_label=args.augmented_label
+        )
 
         train.report({
             "f1_auc": f1_auc,

@@ -162,6 +162,11 @@ def parse_args():
         help="whether to flip the input image up to down",
     )
     parser.add_argument(
+        "--center_cropping",
+        action='store_true',
+        help="whether to center-crop the input image based on the shorter dimension",
+    )
+    parser.add_argument(
          "--augmented_label",
         action='store_true',
         help="whether to augment the label set",
